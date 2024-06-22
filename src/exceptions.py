@@ -1,0 +1,3 @@
+
+class ParserFindTagException(Exception):
+    pass
