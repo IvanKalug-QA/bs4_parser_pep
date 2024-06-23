@@ -10,6 +10,7 @@ from constants import BASE_DIR, MAIN_DOC_URL, EXPECTED_STATUS, MAIN_PEP_URL
 from utils import get_response, find_tag
 from configs import configure_argument_parser, configure_logging
 from outputs import control_output
+from exceptions import NotFoundAllVersions
 
 
 def whats_new(session):
@@ -55,17 +56,17 @@ def latest_versions(session):
         if 'All versions' in ul.text:
             a_tags = ul.find_all('a')
             break
-        else:
-            print('Ничего не нашлось!')
+    else:
+        raise NotFoundAllVersions('Ничего не нашлось!')
 
     results = [('Ссылка на документацию', 'Версия', 'Статус')]
-    for i in a_tags:
+    for a_tag in a_tags:
         pattern = r'Python (?P<version>\d\.\d+) \((?P<status>.*)\)'
-        result = re.search(pattern, i.text)
+        result = re.search(pattern, a_tag.text)
         if result is not None:
-            results.append((i['href'], result.group(1), result.group(2)))
+            results.append((a_tag['href'], result.group(1), result.group(2)))
         else:
-            results.append((i['href'], i.text, 'Nothing'))
+            results.append((a_tag['href'], a_tag.text, 'Nothing'))
 
     return results
 
@@ -111,7 +112,7 @@ def pep(session):
 
     pep_content = find_tag(soup, 'section', {'id': "index-by-category"})
     all_section_category = pep_content.find_all('section')
-    for section in all_section_category:
+    for section in tqdm(all_section_category):
         tbody = find_tag(section, 'tbody')
         tr_result = tbody.find_all('tr')
         for tr in tr_result:
@@ -127,12 +128,12 @@ def pep(session):
             response = get_response(session, link_page_pep)
             soup = BeautifulSoup(response.text, features='lxml')
             abbr = find_tag(soup, 'abbr').text
-            if abbr != 'April Fool!':
-                status = abbr[0] if abbr != 'Draft' else ''
-                status_on_site = EXPECTED_STATUS[status]
+            status = abbr[0] if abbr != 'Draft' else ''
+            status_on_site = EXPECTED_STATUS[status]
+            if abbr in status_on_site:
                 count_pep[status] += 1
             else:
-                status = 'April Fool!'
+                status = abbr
                 status_on_site = status
             if short_status_card != status:
                 if isinstance(expected_status_on_card, tuple):
@@ -149,9 +150,12 @@ def pep(session):
                 logging.info(msg_discrepancy)
 
     for pep in count_pep:
-        writes_in_file.append((pep, count_pep[pep]))
+        if len(EXPECTED_STATUS[pep]) == 2:
+            full_pep = ', '.join(EXPECTED_STATUS[pep])
+        else:
+            full_pep = EXPECTED_STATUS[pep][0]
+        writes_in_file.append((full_pep, count_pep[pep]))
     writes_in_file.append(('Total', total))
-
     return writes_in_file
 
 
@@ -165,27 +169,17 @@ MODE_TO_FUNCTION = {
 
 def main():
     configure_logging()
-
     logging.info('Парсер запущен!')
-
     agrs_parser = configure_argument_parser(MODE_TO_FUNCTION.keys())
-
     agrs = agrs_parser.parse_args()
-
     logging.info(f'Аргументы командной строки -> {agrs}')
-
     session = requests_cache.CachedSession()
-
     if agrs.clear_cache:
         session.cache.clear()
-
     parser_mode = agrs.mode
-
     results = MODE_TO_FUNCTION[parser_mode](session)
-
     if results is not None:
         control_output(results, agrs)
-
     logging.info('Парсер завершил работу')
 
 
